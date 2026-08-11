@@ -1,13 +1,15 @@
 -- ============================================================
--- PROJECT 4: BANKING TRANSACTION ANALYSIS USING SQL
+-- PROJECT 5: E-COMMERCE PERFORMANCE ANALYSIS USING SQL
 -- File: 01_schema.sql
--- Purpose: Account/customer/transaction tables with referential
---          integrity, to detect unusual patterns and financial risk
+-- Purpose: Product, order, and delivery datasets normalized and
+--          connected to measure sales, conversion, and delivery KPIs
 -- ============================================================
 
-DROP TABLE IF EXISTS loans;
-DROP TABLE IF EXISTS transactions;
-DROP TABLE IF EXISTS accounts;
+DROP TABLE IF EXISTS deliveries;
+DROP TABLE IF EXISTS order_items;
+DROP TABLE IF EXISTS orders;
+DROP TABLE IF EXISTS website_visits;
+DROP TABLE IF EXISTS products;
 DROP TABLE IF EXISTS customers;
 
 -- Customers table
@@ -15,41 +17,60 @@ CREATE TABLE customers (
     customer_id   INTEGER PRIMARY KEY,
     customer_name TEXT NOT NULL,
     city          TEXT,
-    join_date     DATE NOT NULL
+    signup_date   DATE NOT NULL
 );
 
--- Accounts table
-CREATE TABLE accounts (
-    account_id     INTEGER PRIMARY KEY,
-    customer_id     INTEGER NOT NULL,
-    account_type     TEXT NOT NULL CHECK (account_type IN ('Savings','Current','Salary')),
-    open_date         DATE NOT NULL,
-    balance            DECIMAL(12,2) NOT NULL,
+-- Products table
+CREATE TABLE products (
+    product_id    INTEGER PRIMARY KEY,
+    product_name  TEXT NOT NULL,
+    category      TEXT NOT NULL,
+    price         DECIMAL(10,2) NOT NULL
+);
+
+-- Website visits table (for conversion rate)
+CREATE TABLE website_visits (
+    visit_id     INTEGER PRIMARY KEY,
+    customer_id   INTEGER,              -- NULL allowed = anonymous/guest visit
+    visit_date     DATE NOT NULL,
+    visit_hour       INTEGER NOT NULL CHECK (visit_hour BETWEEN 0 AND 23),
     FOREIGN KEY (customer_id) REFERENCES customers(customer_id)
 );
 
--- Transactions table
-CREATE TABLE transactions (
-    transaction_id    INTEGER PRIMARY KEY,
-    account_id          INTEGER NOT NULL,
-    transaction_date     DATE NOT NULL,
-    amount                 DECIMAL(12,2) NOT NULL,
-    transaction_type       TEXT NOT NULL CHECK (transaction_type IN ('Credit','Debit')),
-    description             TEXT,
-    FOREIGN KEY (account_id) REFERENCES accounts(account_id)
-);
-
--- Loans table
-CREATE TABLE loans (
-    loan_id            INTEGER PRIMARY KEY,
-    customer_id          INTEGER NOT NULL,
-    loan_amount            DECIMAL(12,2) NOT NULL,
-    status                   TEXT NOT NULL CHECK (status IN ('Active','Paid','Default')),
-    disbursement_date         DATE NOT NULL,
+-- Orders table
+CREATE TABLE orders (
+    order_id      INTEGER PRIMARY KEY,
+    customer_id    INTEGER NOT NULL,
+    order_date      DATE NOT NULL,
+    order_hour        INTEGER NOT NULL CHECK (order_hour BETWEEN 0 AND 23),
+    status              TEXT NOT NULL CHECK (status IN ('Delivered','Cancelled','Processing')),
     FOREIGN KEY (customer_id) REFERENCES customers(customer_id)
 );
 
-CREATE INDEX idx_accounts_customer ON accounts(customer_id);
-CREATE INDEX idx_transactions_account ON transactions(account_id);
-CREATE INDEX idx_transactions_date ON transactions(transaction_date);
-CREATE INDEX idx_loans_customer ON loans(customer_id);
+-- Order items table
+CREATE TABLE order_items (
+    order_item_id  INTEGER PRIMARY KEY,
+    order_id        INTEGER NOT NULL,
+    product_id        INTEGER NOT NULL,
+    quantity            INTEGER NOT NULL,
+    unit_price            DECIMAL(10,2) NOT NULL,
+    FOREIGN KEY (order_id) REFERENCES orders(order_id),
+    FOREIGN KEY (product_id) REFERENCES products(product_id)
+);
+
+-- Deliveries table
+CREATE TABLE deliveries (
+    delivery_id      INTEGER PRIMARY KEY,
+    order_id           INTEGER NOT NULL UNIQUE,
+    expected_date         DATE NOT NULL,
+    delivered_date           DATE,               -- NULL if not yet delivered
+    delivery_status            TEXT NOT NULL CHECK (delivery_status IN ('On Time','Delayed','Not Delivered')),
+    FOREIGN KEY (order_id) REFERENCES orders(order_id)
+);
+
+CREATE INDEX idx_visits_date ON website_visits(visit_date);
+CREATE INDEX idx_orders_customer ON orders(customer_id);
+CREATE INDEX idx_orders_date ON orders(order_date);
+CREATE INDEX idx_items_order ON order_items(order_id);
+CREATE INDEX idx_items_product ON order_items(product_id);
+CREATE INDEX idx_deliveries_order ON deliveries(order_id);

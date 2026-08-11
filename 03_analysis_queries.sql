@@ -1,144 +1,90 @@
 -- ============================================================
--- PROJECT 4: BANKING TRANSACTION ANALYSIS USING SQL
+-- PROJECT 5: E-COMMERCE PERFORMANCE ANALYSIS USING SQL
 -- File: 03_analysis_queries.sql
--- Purpose: Detect unusual spending patterns and financial risk
---          using window functions (LAG, LEAD)
+-- Purpose: Conversion rate, AOV, peak sales time, cancellation
+--          rate, and delivery performance KPIs
 -- ============================================================
 
 -- ------------------------------------------------------------
--- Q1. UNUSUAL SPENDING SPIKES (using LAG)
--- Flags a debit transaction as a spike if it is more than
--- 5x the customer's previous debit transaction amount.
--- ------------------------------------------------------------
-WITH debit_txns AS (
-    SELECT
-        transaction_id,
-        account_id,
-        transaction_date,
-        amount,
-        LAG(amount) OVER (PARTITION BY account_id ORDER BY transaction_date, transaction_id) AS prev_amount
-    FROM transactions
-    WHERE transaction_type = 'Debit'
-)
-SELECT
-    transaction_id,
-    account_id,
-    transaction_date,
-    amount,
-    prev_amount,
-    ROUND(amount / NULLIF(prev_amount, 0), 2) AS spike_ratio
-FROM debit_txns
-WHERE prev_amount IS NOT NULL
-  AND amount > prev_amount * 5
-ORDER BY spike_ratio DESC;
-
-
--- ------------------------------------------------------------
--- Q2. HIGH-VALUE TRANSACTIONS (above ₹75,000)
+-- Q1. CONVERSION RATE (website visits -> orders placed)
 -- ------------------------------------------------------------
 SELECT
-    t.transaction_id,
-    c.customer_name,
-    t.account_id,
-    t.transaction_date,
-    t.amount,
-    t.transaction_type,
-    t.description
-FROM transactions t
-JOIN accounts a ON a.account_id = t.account_id
-JOIN customers c ON c.customer_id = a.customer_id
-WHERE t.amount > 75000
-ORDER BY t.amount DESC;
+    (SELECT COUNT(*) FROM website_visits) AS total_visits,
+    (SELECT COUNT(*) FROM orders) AS total_orders,
+    ROUND(100.0 * (SELECT COUNT(*) FROM orders) / (SELECT COUNT(*) FROM website_visits), 2) AS conversion_rate_percent;
 
 
 -- ------------------------------------------------------------
--- Q3. RAPID SUCCESSIVE HIGH-VALUE TRANSACTIONS (using LEAD)
--- Flags cases where two large debits (>10,000) happen on the
--- SAME account within 2 days of each other - a common fraud pattern.
--- ------------------------------------------------------------
-WITH ordered_debits AS (
-    SELECT
-        transaction_id,
-        account_id,
-        transaction_date,
-        amount,
-        LEAD(transaction_date) OVER (PARTITION BY account_id ORDER BY transaction_date, transaction_id) AS next_date,
-        LEAD(amount) OVER (PARTITION BY account_id ORDER BY transaction_date, transaction_id) AS next_amount
-    FROM transactions
-    WHERE transaction_type = 'Debit' AND amount > 10000
-)
-SELECT
-    account_id,
-    transaction_date AS txn1_date,
-    amount AS txn1_amount,
-    next_date AS txn2_date,
-    next_amount AS txn2_amount,
-    CAST(julianday(next_date) - julianday(transaction_date) AS INTEGER) AS days_apart
-FROM ordered_debits
-WHERE next_date IS NOT NULL
-  AND julianday(next_date) - julianday(transaction_date) <= 2
-ORDER BY account_id, transaction_date;
-
-
--- ------------------------------------------------------------
--- Q4. LOAN DEFAULT RATE
+-- Q2. AVERAGE ORDER VALUE (AOV)
 -- ------------------------------------------------------------
 SELECT
-    COUNT(*) AS total_loans,
-    SUM(CASE WHEN status = 'Default' THEN 1 ELSE 0 END) AS defaulted_loans,
-    ROUND(100.0 * SUM(CASE WHEN status = 'Default' THEN 1 ELSE 0 END) / COUNT(*), 2) AS default_rate_percent,
-    ROUND(SUM(CASE WHEN status = 'Default' THEN loan_amount ELSE 0 END), 2) AS total_amount_at_risk
-FROM loans;
+    ROUND(SUM(oi.quantity * oi.unit_price) * 1.0 / COUNT(DISTINCT o.order_id), 2) AS average_order_value
+FROM orders o
+JOIN order_items oi ON oi.order_id = o.order_id
+WHERE o.status != 'Cancelled';
 
 
 -- ------------------------------------------------------------
--- Q5. LOAN RISK CATEGORIZATION PER CUSTOMER
--- ------------------------------------------------------------
-SELECT
-    c.customer_name,
-    COUNT(l.loan_id) AS total_loans,
-    ROUND(SUM(l.loan_amount), 2) AS total_loan_amount,
-    SUM(CASE WHEN l.status = 'Default' THEN 1 ELSE 0 END) AS defaults,
-    CASE
-        WHEN SUM(CASE WHEN l.status = 'Default' THEN 1 ELSE 0 END) > 0 THEN 'High Risk'
-        WHEN SUM(l.loan_amount) > 800000 THEN 'Medium Risk'
-        ELSE 'Low Risk'
-    END AS risk_level
-FROM customers c
-JOIN loans l ON l.customer_id = c.customer_id
-GROUP BY c.customer_id
-ORDER BY defaults DESC, total_loan_amount DESC;
-
-
--- ------------------------------------------------------------
--- Q6. MONTHLY DEBIT vs CREDIT SUMMARY (cash flow monitoring)
+-- Q3. PEAK SALES TIME (by hour of day)
 -- ------------------------------------------------------------
 SELECT
-    strftime('%Y-%m', transaction_date) AS month,
-    ROUND(SUM(CASE WHEN transaction_type = 'Credit' THEN amount ELSE 0 END), 2) AS total_credit,
-    ROUND(SUM(CASE WHEN transaction_type = 'Debit' THEN amount ELSE 0 END), 2) AS total_debit,
-    ROUND(SUM(CASE WHEN transaction_type = 'Credit' THEN amount ELSE -amount END), 2) AS net_flow
-FROM transactions
+    order_hour,
+    COUNT(*) AS num_orders
+FROM orders
+WHERE status != 'Cancelled'
+GROUP BY order_hour
+ORDER BY num_orders DESC
+LIMIT 5;
+
+
+-- ------------------------------------------------------------
+-- Q4. CANCELLATION RATE
+-- ------------------------------------------------------------
+SELECT
+    COUNT(*) AS total_orders,
+    SUM(CASE WHEN status = 'Cancelled' THEN 1 ELSE 0 END) AS cancelled_orders,
+    ROUND(100.0 * SUM(CASE WHEN status = 'Cancelled' THEN 1 ELSE 0 END) / COUNT(*), 2) AS cancellation_rate_percent
+FROM orders;
+
+
+-- ------------------------------------------------------------
+-- Q5. DELIVERY PERFORMANCE (on-time %)
+-- ------------------------------------------------------------
+SELECT
+    delivery_status,
+    COUNT(*) AS num_deliveries,
+    ROUND(100.0 * COUNT(*) / (SELECT COUNT(*) FROM deliveries), 2) AS percent_of_deliveries
+FROM deliveries
+GROUP BY delivery_status
+ORDER BY num_deliveries DESC;
+
+
+-- ------------------------------------------------------------
+-- Q6. TOP-SELLING PRODUCTS & CATEGORY REVENUE
+-- ------------------------------------------------------------
+SELECT
+    p.product_name,
+    p.category,
+    SUM(oi.quantity) AS units_sold,
+    ROUND(SUM(oi.quantity * oi.unit_price), 2) AS revenue
+FROM order_items oi
+JOIN products p ON p.product_id = oi.product_id
+JOIN orders o ON o.order_id = oi.order_id
+WHERE o.status != 'Cancelled'
+GROUP BY p.product_id
+ORDER BY revenue DESC
+LIMIT 5;
+
+
+-- ------------------------------------------------------------
+-- Q7. MONTHLY SALES PERFORMANCE TREND
+-- ------------------------------------------------------------
+SELECT
+    strftime('%Y-%m', o.order_date) AS month,
+    COUNT(DISTINCT o.order_id) AS total_orders,
+    ROUND(SUM(oi.quantity * oi.unit_price), 2) AS total_revenue
+FROM orders o
+JOIN order_items oi ON oi.order_id = o.order_id
+WHERE o.status != 'Cancelled'
 GROUP BY month
 ORDER BY month;
-
-
--- ------------------------------------------------------------
--- Q7. SUSPICIOUS TRANSACTION SUMMARY REPORT
--- (Combines high value + rapid succession flags into one risk view)
--- ------------------------------------------------------------
-SELECT
-    a.account_id,
-    c.customer_name,
-    COUNT(t.transaction_id) AS high_value_txn_count,
-    ROUND(SUM(t.amount), 2) AS total_high_value_amount,
-    CASE
-        WHEN COUNT(t.transaction_id) >= 3 THEN 'High Risk Account'
-        WHEN COUNT(t.transaction_id) >= 1 THEN 'Watchlist'
-        ELSE 'Normal'
-    END AS risk_flag
-FROM accounts a
-JOIN customers c ON c.customer_id = a.customer_id
-JOIN transactions t ON t.account_id = a.account_id AND t.amount > 75000
-GROUP BY a.account_id
-ORDER BY high_value_txn_count DESC, total_high_value_amount DESC;

@@ -1,8 +1,8 @@
-# Project 4 — Banking Transaction Analysis Using SQL
+# Project 5 — E-Commerce Performance Analysis Using SQL
 
-Monitors account transaction data to detect unusual spending patterns,
-high-value transactions, and loan default risk — using SQL **window
-functions (LAG, LEAD)** as required for accurate pattern detection.
+Analyzes product sales, delivery performance, and customer traffic to
+measure the KPIs that matter most in e-commerce: conversion rate,
+average order value, peak sales time, cancellations, and delivery reliability.
 
 ---
 
@@ -10,10 +10,10 @@ functions (LAG, LEAD)** as required for accurate pattern detection.
 
 | File | Purpose |
 |---|---|
-| `01_schema.sql` | Creates `customers`, `accounts`, `transactions`, `loans` with referential integrity |
-| `02_sample_data.sql` | Inserts sample data (25 customers, 33 accounts, 817 transactions, 11 loans) |
-| `03_analysis_queries.sql` | 7 queries: spike detection, high-value txns, rapid succession fraud pattern, loan risk |
-| `banking_analysis.db` | Pre-built SQLite database |
+| `01_schema.sql` | Creates `customers`, `products`, `website_visits`, `orders`, `order_items`, `deliveries` — normalized and connected |
+| `02_sample_data.sql` | Inserts sample data (35 customers, 15 products, 600 visits, 84 orders, 173 items, 77 deliveries) |
+| `03_analysis_queries.sql` | 7 KPI queries |
+| `ecommerce_analysis.db` | Pre-built SQLite database |
 | `README.md` | This guide |
 
 ---
@@ -21,15 +21,17 @@ functions (LAG, LEAD)** as required for accurate pattern detection.
 ## 🧩 Database Design
 
 ```
-customers    (customer_id PK, customer_name, city, join_date)
-accounts     (account_id PK, customer_id FK, account_type, open_date, balance)
-transactions (transaction_id PK, account_id FK, transaction_date, amount, transaction_type, description)
-loans        (loan_id PK, customer_id FK, loan_amount, status, disbursement_date)
+customers      (customer_id PK, customer_name, city, signup_date)
+products       (product_id PK, product_name, category, price)
+website_visits (visit_id PK, customer_id FK nullable, visit_date, visit_hour)
+orders         (order_id PK, customer_id FK, order_date, order_hour, status)
+order_items    (order_item_id PK, order_id FK, product_id FK, quantity, unit_price)
+deliveries     (delivery_id PK, order_id FK unique, expected_date, delivered_date, delivery_status)
 ```
 
-Referential integrity: every account belongs to a customer, every
-transaction belongs to an account, every loan belongs to a customer —
-no orphaned records.
+`website_visits.customer_id` is nullable to represent **anonymous/guest
+browsing**, which is essential for an accurate conversion-rate
+calculation (visits ≠ only logged-in customers).
 
 ---
 
@@ -39,69 +41,66 @@ no orphaned records.
 
 **Step 2:** Build the database:
 ```bash
-sqlite3 banking_analysis.db < 01_schema.sql
-sqlite3 banking_analysis.db < 02_sample_data.sql
+sqlite3 ecommerce_analysis.db < 01_schema.sql
+sqlite3 ecommerce_analysis.db < 02_sample_data.sql
 ```
 
 **Step 3:** Run the analysis:
 ```bash
-sqlite3 banking_analysis.db < 03_analysis_queries.sql
+sqlite3 ecommerce_analysis.db < 03_analysis_queries.sql
 ```
 
-> No `sqlite3` CLI? Open `banking_analysis.db` in **DB Browser for
+> No `sqlite3` CLI? Open `ecommerce_analysis.db` in **DB Browser for
 > SQLite** (https://sqlitebrowser.org) and run queries from "Execute SQL".
-> Note: window functions (`LAG`/`LEAD`) need SQLite 3.25+ / any modern
-> MySQL 8+ or PostgreSQL — all standard in recent installs.
 
 ---
 
 ## 📊 What Each Query Tells You
 
-### 1. Unusual Spending Spikes (`LAG`)
-Compares each debit to the **same account's previous debit** using
-`LAG()`. Flags any transaction that's more than 5x the prior one.
-**Sample result:** 58 spike transactions detected, the largest a
-₹2.7L transfer that was 385x the account's previous debit.
+### 1. Conversion Rate
+Website visits that turned into an order. **Sample result: 14.0%**
+(84 orders from 600 visits) — a realistic e-commerce benchmark.
 
-### 2. High-Value Transactions
-Every transaction above ₹75,000 — a standard AML/compliance threshold
-starting point.
+### 2. Average Order Value (AOV)
+Revenue per non-cancelled order. **Sample result: ₹13,306** — a core
+metric for evaluating marketing spend efficiency.
 
-### 3. Rapid Succession High-Value Transactions (`LEAD`)
-Uses `LEAD()` to check if **two large debits (>₹10,000) happen within
-2 days on the same account** — a classic structuring/fraud pattern.
-**Sample result:** 11 such pairs found, including two transactions on
-the very same day for one account.
+### 3. Peak Sales Time
+Ranks hours of the day by order volume. **Sample result:** 5–6 PM is
+the peak ordering window — directly useful for scheduling flash sales
+or ad spend.
 
-### 4. Loan Default Rate
-Headline risk KPI. **Sample result:** 18.18% default rate, ~₹18L at risk.
+### 4. Cancellation Rate
+**Sample result: 8.33%** of all orders were cancelled — a health
+metric to track against industry benchmarks (~5–10% is typical).
 
-### 5. Loan Risk Categorization
-Labels each borrowing customer **High / Medium / Low Risk** based on
-default history and total exposure — ready for a risk dashboard.
+### 5. Delivery Performance
+Breaks down delivered orders into **On Time / Delayed / Not
+Delivered**. **Sample result: 66% on-time rate** — flags a logistics
+issue worth investigating (23% delayed).
 
-### 6. Monthly Debit vs Credit Summary
-Net cash flow per month — useful for liquidity monitoring at the bank level.
+### 6. Top-Selling Products
+Ranks products by revenue for non-cancelled orders — "Standing Desk"
+leads in this dataset.
 
-### 7. Suspicious Transaction Summary Report
-Rolls up high-value activity per account into a **Watchlist / High Risk
-Account / Normal** flag — the "clearly reported" risk summary required
-by the task plan.
+### 7. Monthly Sales Trend
+Order count and revenue by month — the base data for a sales
+dashboard or forecasting model.
 
 ---
 
 ## ✅ How This Meets the Task Plan Criteria
 
-- **Well-Structured:** 4 tables with full referential integrity (FKs on every child table).
-- **Accurate & Reliable:** `LAG`/`LEAD` window functions used correctly, partitioned by `account_id` and ordered by date — avoids comparing transactions across different accounts.
-- **Risk-Focused:** Every query outputs a risk signal — spike ratio, high-value flag, default status, or risk level.
-- **Clearly Reported:** Query 7 consolidates raw transaction flags into a single per-account risk label.
-- **Reproducible:** Spike threshold (5x), high-value threshold (₹75,000), and rapid-succession window (2 days) are all documented and easy to tune.
+- **Well-Structured:** 6 normalized tables properly connected (visits → orders → items → deliveries), with a `UNIQUE` constraint ensuring one delivery per order.
+- **Accurate & Reliable:** Cancelled orders are explicitly excluded from revenue/AOV/product-performance queries (`WHERE status != 'Cancelled'`) to avoid inflating numbers.
+- **Performance-Focused:** Directly answers conversion rate, AOV, and peak sales time as required — the three headline KPIs named in the task plan.
+- **Clearly Reported:** Every query returns a single, labeled KPI or ranked table ready to drop into a dashboard.
+- **Reproducible:** KPI definitions (e.g., "cancelled orders excluded from AOV", "on-time = delivered on/before expected date") are documented here for future analysts.
 
 ---
 
 ## 🚀 Next Steps / Extensions
 
-- Add a `flagged_transactions` audit table that logs which rule caught each case.
-- Layer in a rolling 30-day average spend per account (window function `AVG() OVER`) for smarter anomaly detection than simple prior-transaction comparison.
-- Connect to a real-time alerting system for the "High Risk Account" segment.
+- Add a `discounts`/`coupons` table to measure promo effectiveness on conversion rate.
+- Track `visit_id` → `order_id` explicitly (session-level attribution) for a true funnel analysis, not just aggregate conversion.
+- Build a Power BI/Tableau dashboard combining this project's KPIs with Project 1's revenue trend for a full sales+ops view.
