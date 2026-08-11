@@ -1,8 +1,8 @@
-# Project 3 — HR Analytics Using SQL
+# Project 4 — Banking Transaction Analysis Using SQL
 
-Analyzes employee data across departments to understand attrition trends,
-salary distribution (including pay-gap checks), and workforce performance —
-built to guide real HR decisions.
+Monitors account transaction data to detect unusual spending patterns,
+high-value transactions, and loan default risk — using SQL **window
+functions (LAG, LEAD)** as required for accurate pattern detection.
 
 ---
 
@@ -10,10 +10,10 @@ built to guide real HR decisions.
 
 | File | Purpose |
 |---|---|
-| `01_schema.sql` | Creates `departments` and `employees` tables linked by relational key |
-| `02_sample_data.sql` | Inserts sample data (8 departments, 142 employees) |
-| `03_analysis_queries.sql` | 7 queries: attrition, salary, pay gap, performance, tenure |
-| `hr_analytics.db` | Pre-built SQLite database |
+| `01_schema.sql` | Creates `customers`, `accounts`, `transactions`, `loans` with referential integrity |
+| `02_sample_data.sql` | Inserts sample data (25 customers, 33 accounts, 817 transactions, 11 loans) |
+| `03_analysis_queries.sql` | 7 queries: spike detection, high-value txns, rapid succession fraud pattern, loan risk |
+| `banking_analysis.db` | Pre-built SQLite database |
 | `README.md` | This guide |
 
 ---
@@ -21,13 +21,15 @@ built to guide real HR decisions.
 ## 🧩 Database Design
 
 ```
-departments (department_id PK, department_name)
-employees   (employee_id PK, employee_name, department_id FK, gender,
-             salary, hire_date, status, resignation_date, performance_rating)
+customers    (customer_id PK, customer_name, city, join_date)
+accounts     (account_id PK, customer_id FK, account_type, open_date, balance)
+transactions (transaction_id PK, account_id FK, transaction_date, amount, transaction_type, description)
+loans        (loan_id PK, customer_id FK, loan_amount, status, disbursement_date)
 ```
 
-`status` is `'Active'` or `'Resigned'`; `resignation_date` is `NULL` for
-active employees. `performance_rating` is on a 1–5 scale.
+Referential integrity: every account belongs to a customer, every
+transaction belongs to an account, every loan belongs to a customer —
+no orphaned records.
 
 ---
 
@@ -37,66 +39,69 @@ active employees. `performance_rating` is on a 1–5 scale.
 
 **Step 2:** Build the database:
 ```bash
-sqlite3 hr_analytics.db < 01_schema.sql
-sqlite3 hr_analytics.db < 02_sample_data.sql
+sqlite3 banking_analysis.db < 01_schema.sql
+sqlite3 banking_analysis.db < 02_sample_data.sql
 ```
 
 **Step 3:** Run the analysis:
 ```bash
-sqlite3 hr_analytics.db < 03_analysis_queries.sql
+sqlite3 banking_analysis.db < 03_analysis_queries.sql
 ```
 
-> No `sqlite3` CLI? Open `hr_analytics.db` in **DB Browser for SQLite**
-> (https://sqlitebrowser.org) and run queries from the "Execute SQL" tab.
+> No `sqlite3` CLI? Open `banking_analysis.db` in **DB Browser for
+> SQLite** (https://sqlitebrowser.org) and run queries from "Execute SQL".
+> Note: window functions (`LAG`/`LEAD`) need SQLite 3.25+ / any modern
+> MySQL 8+ or PostgreSQL — all standard in recent installs.
 
 ---
 
 ## 📊 What Each Query Tells You
 
-### 1. Attrition Rate by Department
-**Sample result:** Sales has the highest attrition (~44%), notably above
-Engineering (~26%) and Customer Support (~24%).
+### 1. Unusual Spending Spikes (`LAG`)
+Compares each debit to the **same account's previous debit** using
+`LAG()`. Flags any transaction that's more than 5x the prior one.
+**Sample result:** 58 spike transactions detected, the largest a
+₹2.7L transfer that was 385x the account's previous debit.
 
-### 2. Average Salary by Department
-Ranks departments by average active-employee salary — Product and
-Engineering pay the highest in this dataset.
+### 2. High-Value Transactions
+Every transaction above ₹75,000 — a standard AML/compliance threshold
+starting point.
 
-### 3. Gender Pay Gap by Department
-Compares average male vs. female salary per department. **Sample result:**
-Engineering shows the widest gap (~₹23K), while Product is essentially
-balanced (slightly favoring female average) — a useful audit table for HR.
+### 3. Rapid Succession High-Value Transactions (`LEAD`)
+Uses `LEAD()` to check if **two large debits (>₹10,000) happen within
+2 days on the same account** — a classic structuring/fraud pattern.
+**Sample result:** 11 such pairs found, including two transactions on
+the very same day for one account.
 
-### 4. Top Performers
-Lists active employees rated 4 or 5, sorted by rating then salary — a
-quick retention-priority / promotion-candidate list.
+### 4. Loan Default Rate
+Headline risk KPI. **Sample result:** 18.18% default rate, ~₹18L at risk.
 
-### 5. Average Tenure by Department
-Calculates average years of service (using resignation date for
-ex-employees, today's date for active ones) — Product employees stay
-longest on average in this dataset (~3.1 years).
+### 5. Loan Risk Categorization
+Labels each borrowing customer **High / Medium / Low Risk** based on
+default history and total exposure — ready for a risk dashboard.
 
-### 6. Performance Rating Distribution
-A workforce-quality snapshot: what % of employees fall into each rating
-bucket (this dataset: ~13% rated 5, ~38% rated 4).
+### 6. Monthly Debit vs Credit Summary
+Net cash flow per month — useful for liquidity monitoring at the bank level.
 
-### 7. High-Attrition Departments Flagged for Review
-Automatically flags any department whose attrition rate is **above the
-company-wide average** — a ready-made action list for HR leadership.
+### 7. Suspicious Transaction Summary Report
+Rolls up high-value activity per account into a **Watchlist / High Risk
+Account / Normal** flag — the "clearly reported" risk summary required
+by the task plan.
 
 ---
 
 ## ✅ How This Meets the Task Plan Criteria
 
-- **Well-Structured:** Employees properly linked to departments via foreign key; `CHECK` constraints enforce valid gender/status/rating values.
-- **Accurate & Reliable:** Attrition and averages use correct `GROUP BY` + conditional aggregation (`CASE WHEN` inside `SUM`/`AVG`), not manual counting.
-- **Decision-Focused:** Every query maps to a real HR decision — who to retain, where pay gaps exist, which departments need review.
-- **Clearly Reported:** Query 7 auto-generates a "flagged for review" list rather than leaving interpretation to the reader.
-- **Reproducible:** All logic (attrition thresholds, tenure formula, rating buckets) is documented in-query and in this README.
+- **Well-Structured:** 4 tables with full referential integrity (FKs on every child table).
+- **Accurate & Reliable:** `LAG`/`LEAD` window functions used correctly, partitioned by `account_id` and ordered by date — avoids comparing transactions across different accounts.
+- **Risk-Focused:** Every query outputs a risk signal — spike ratio, high-value flag, default status, or risk level.
+- **Clearly Reported:** Query 7 consolidates raw transaction flags into a single per-account risk label.
+- **Reproducible:** Spike threshold (5x), high-value threshold (₹75,000), and rapid-succession window (2 days) are all documented and easy to tune.
 
 ---
 
 ## 🚀 Next Steps / Extensions
 
-- Add an `exit_interviews` table with reason codes to correlate attrition causes.
-- Track promotions/salary revisions over time with a `salary_history` table.
-- Build a Power BI/Tableau dashboard on top of the CSV exports for leadership reporting.
+- Add a `flagged_transactions` audit table that logs which rule caught each case.
+- Layer in a rolling 30-day average spend per account (window function `AVG() OVER`) for smarter anomaly detection than simple prior-transaction comparison.
+- Connect to a real-time alerting system for the "High Risk Account" segment.

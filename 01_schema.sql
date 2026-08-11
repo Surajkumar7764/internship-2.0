@@ -1,32 +1,55 @@
 -- ============================================================
--- PROJECT 3: HR ANALYTICS USING SQL
+-- PROJECT 4: BANKING TRANSACTION ANALYSIS USING SQL
 -- File: 01_schema.sql
--- Purpose: Employee, department tables linked with relational keys
---          to analyze attrition, salary, and performance
+-- Purpose: Account/customer/transaction tables with referential
+--          integrity, to detect unusual patterns and financial risk
 -- ============================================================
 
-DROP TABLE IF EXISTS employees;
-DROP TABLE IF EXISTS departments;
+DROP TABLE IF EXISTS loans;
+DROP TABLE IF EXISTS transactions;
+DROP TABLE IF EXISTS accounts;
+DROP TABLE IF EXISTS customers;
 
--- Departments table
-CREATE TABLE departments (
-    department_id   INTEGER PRIMARY KEY,
-    department_name TEXT NOT NULL UNIQUE
+-- Customers table
+CREATE TABLE customers (
+    customer_id   INTEGER PRIMARY KEY,
+    customer_name TEXT NOT NULL,
+    city          TEXT,
+    join_date     DATE NOT NULL
 );
 
--- Employees table
-CREATE TABLE employees (
-    employee_id        INTEGER PRIMARY KEY,
-    employee_name       TEXT NOT NULL,
-    department_id        INTEGER NOT NULL,
-    gender                TEXT NOT NULL CHECK (gender IN ('Male','Female')),
-    salary                DECIMAL(10,2) NOT NULL,
-    hire_date             DATE NOT NULL,
-    status                 TEXT NOT NULL CHECK (status IN ('Active','Resigned')),
-    resignation_date       DATE,               -- NULL if still active
-    performance_rating     INTEGER NOT NULL CHECK (performance_rating BETWEEN 1 AND 5),
-    FOREIGN KEY (department_id) REFERENCES departments(department_id)
+-- Accounts table
+CREATE TABLE accounts (
+    account_id     INTEGER PRIMARY KEY,
+    customer_id     INTEGER NOT NULL,
+    account_type     TEXT NOT NULL CHECK (account_type IN ('Savings','Current','Salary')),
+    open_date         DATE NOT NULL,
+    balance            DECIMAL(12,2) NOT NULL,
+    FOREIGN KEY (customer_id) REFERENCES customers(customer_id)
 );
 
-CREATE INDEX idx_employees_department ON employees(department_id);
-CREATE INDEX idx_employees_status ON employees(status);
+-- Transactions table
+CREATE TABLE transactions (
+    transaction_id    INTEGER PRIMARY KEY,
+    account_id          INTEGER NOT NULL,
+    transaction_date     DATE NOT NULL,
+    amount                 DECIMAL(12,2) NOT NULL,
+    transaction_type       TEXT NOT NULL CHECK (transaction_type IN ('Credit','Debit')),
+    description             TEXT,
+    FOREIGN KEY (account_id) REFERENCES accounts(account_id)
+);
+
+-- Loans table
+CREATE TABLE loans (
+    loan_id            INTEGER PRIMARY KEY,
+    customer_id          INTEGER NOT NULL,
+    loan_amount            DECIMAL(12,2) NOT NULL,
+    status                   TEXT NOT NULL CHECK (status IN ('Active','Paid','Default')),
+    disbursement_date         DATE NOT NULL,
+    FOREIGN KEY (customer_id) REFERENCES customers(customer_id)
+);
+
+CREATE INDEX idx_accounts_customer ON accounts(customer_id);
+CREATE INDEX idx_transactions_account ON transactions(account_id);
+CREATE INDEX idx_transactions_date ON transactions(transaction_date);
+CREATE INDEX idx_loans_customer ON loans(customer_id);
