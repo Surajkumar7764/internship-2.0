@@ -1,109 +1,138 @@
 -- ============================================================
--- PROJECT 1: SALES DATA ANALYSIS USING SQL
+-- PROJECT 2: CUSTOMER BEHAVIOR ANALYSIS USING SQL
 -- File: 03_analysis_queries.sql
--- Purpose: Answer key business questions
---   1. Monthly revenue trend
---   2. Top-selling products
---   3. Repeat customers
---   4. Profit margins by category
---   5. Customer lifetime value (bonus)
+-- Purpose: RFM segmentation, CLV, churn detection, engagement patterns
+-- "Today" reference date used for recency calculations: 2026-08-07
 -- ============================================================
 
 -- ------------------------------------------------------------
--- Q1. MONTHLY REVENUE TREND
--- (Revenue = amount actually paid, only completed/paid orders)
--- ------------------------------------------------------------
-SELECT
-    strftime('%Y-%m', payment_date) AS month,
-    ROUND(SUM(amount), 2) AS total_revenue,
-    COUNT(DISTINCT order_id) AS total_orders
-FROM payments
-GROUP BY month
-ORDER BY month;
-
-
--- ------------------------------------------------------------
--- Q2. TOP-SELLING PRODUCTS (by revenue and by quantity)
--- ------------------------------------------------------------
-SELECT
-    p.product_name,
-    p.category,
-    SUM(oi.quantity) AS total_quantity_sold,
-    ROUND(SUM(oi.quantity * oi.unit_price), 2) AS total_revenue
-FROM order_items oi
-JOIN products p ON p.product_id = oi.product_id
-JOIN orders o ON o.order_id = oi.order_id
-WHERE o.status = 'Completed'
-GROUP BY p.product_id
-ORDER BY total_revenue DESC
-LIMIT 5;
-
-
--- ------------------------------------------------------------
--- Q3. REPEAT CUSTOMERS
--- (Customers who placed more than one completed order)
+-- Q1. RECENCY, FREQUENCY, MONETARY (RFM) PER CUSTOMER
 -- ------------------------------------------------------------
 SELECT
     c.customer_id,
     c.customer_name,
-    COUNT(o.order_id) AS total_orders,
-    ROUND(SUM(pay.amount), 2) AS total_spent
+    CAST(julianday('2026-08-07') - julianday(MAX(t.transaction_date)) AS INTEGER) AS recency_days,
+    COUNT(t.transaction_id) AS frequency,
+    ROUND(SUM(t.amount), 2) AS monetary_value
 FROM customers c
-JOIN orders o ON o.customer_id = c.customer_id
-JOIN payments pay ON pay.order_id = o.order_id
-WHERE o.status = 'Completed'
+JOIN transactions t ON t.customer_id = c.customer_id
 GROUP BY c.customer_id
-HAVING COUNT(o.order_id) > 1
-ORDER BY total_orders DESC, total_spent DESC;
+ORDER BY monetary_value DESC;
 
 
 -- ------------------------------------------------------------
--- Q4. PROFIT MARGIN BY CATEGORY
--- (Profit = (price - cost) * quantity sold)
+-- Q2. RFM SEGMENTATION
+-- (Simple rule-based scoring: label each customer as
+--  Champion / Loyal / At Risk / Lost based on recency & frequency)
 -- ------------------------------------------------------------
+WITH rfm AS (
+    SELECT
+        c.customer_id,
+        c.customer_name,
+        CAST(julianday('2026-08-07') - julianday(MAX(t.transaction_date)) AS INTEGER) AS recency_days,
+        COUNT(t.transaction_id) AS frequency,
+        ROUND(SUM(t.amount), 2) AS monetary_value
+    FROM customers c
+    JOIN transactions t ON t.customer_id = c.customer_id
+    GROUP BY c.customer_id
+)
 SELECT
-    p.category,
-    ROUND(SUM(oi.quantity * oi.unit_price), 2) AS total_revenue,
-    ROUND(SUM(oi.quantity * p.cost), 2) AS total_cost,
-    ROUND(SUM(oi.quantity * (oi.unit_price - p.cost)), 2) AS total_profit,
-    ROUND(
-        100.0 * SUM(oi.quantity * (oi.unit_price - p.cost)) / SUM(oi.quantity * oi.unit_price), 2
-    ) AS profit_margin_percent
-FROM order_items oi
-JOIN products p ON p.product_id = oi.product_id
-JOIN orders o ON o.order_id = oi.order_id
-WHERE o.status = 'Completed'
-GROUP BY p.category
-ORDER BY total_profit DESC;
-
-
--- ------------------------------------------------------------
--- Q5 (BONUS). CUSTOMER SEGMENTATION BY TOTAL SPEND
--- (High / Medium / Low value customers)
--- ------------------------------------------------------------
-SELECT
-    c.customer_id,
-    c.customer_name,
-    ROUND(SUM(pay.amount), 2) AS total_spent,
+    customer_id,
+    customer_name,
+    recency_days,
+    frequency,
+    monetary_value,
     CASE
-        WHEN SUM(pay.amount) >= 15000 THEN 'High Value'
-        WHEN SUM(pay.amount) >= 7000  THEN 'Medium Value'
-        ELSE 'Low Value'
-    END AS customer_segment
-FROM customers c
-JOIN orders o ON o.customer_id = c.customer_id
-JOIN payments pay ON pay.order_id = o.order_id
-WHERE o.status = 'Completed'
-GROUP BY c.customer_id
-ORDER BY total_spent DESC;
+        WHEN recency_days <= 240 AND frequency >= 6 THEN 'Champion'
+        WHEN recency_days <= 400 AND frequency >= 3 THEN 'Loyal'
+        WHEN recency_days > 400 AND frequency >= 3 THEN 'At Risk'
+        WHEN recency_days > 400 AND frequency < 3  THEN 'Lost / Churned'
+        ELSE 'New / Occasional'
+    END AS rfm_segment
+FROM rfm
+ORDER BY monetary_value DESC;
 
 
 -- ------------------------------------------------------------
--- Q6 (BONUS). ORDER STATUS BREAKDOWN (data quality check)
+-- Q3. CUSTOMER LIFETIME VALUE (CLV)
+-- (Total spend + average order value + tenure in days)
 -- ------------------------------------------------------------
 SELECT
-    status,
-    COUNT(*) AS num_orders,
-    ROUND(100.0 * COUNT(*) / (SELECT COUNT(*) FROM orders), 2) AS percent_of_total
-FROM orders
-GROUP BY status;
+    c.customer_id,
+    c.customer_name,
+    c.signup_date,
+    COUNT(t.transaction_id) AS total_orders,
+    ROUND(SUM(t.amount), 2) AS total_spent,
+    ROUND(AVG(t.amount), 2) AS avg_order_value,
+    CAST(julianday('2026-08-07') - julianday(c.signup_date) AS INTEGER) AS customer_age_days,
+    ROUND(SUM(t.amount) * 1.0 /
+          ((julianday('2026-08-07') - julianday(c.signup_date)) / 365.0), 2) AS estimated_annual_clv
+FROM customers c
+JOIN transactions t ON t.customer_id = c.customer_id
+GROUP BY c.customer_id
+ORDER BY total_spent DESC
+LIMIT 10;
+
+
+-- ------------------------------------------------------------
+-- Q4. CHURN ANALYSIS
+-- (Customers with no transaction in the last 300 days = churn risk)
+-- ------------------------------------------------------------
+SELECT
+    c.customer_id,
+    c.customer_name,
+    MAX(t.transaction_date) AS last_purchase_date,
+    CAST(julianday('2026-08-07') - julianday(MAX(t.transaction_date)) AS INTEGER) AS days_since_last_purchase,
+    CASE
+        WHEN CAST(julianday('2026-08-07') - julianday(MAX(t.transaction_date)) AS INTEGER) > 300
+        THEN 'Churn Risk'
+        ELSE 'Active'
+    END AS churn_status
+FROM customers c
+JOIN transactions t ON t.customer_id = c.customer_id
+GROUP BY c.customer_id
+ORDER BY days_since_last_purchase DESC;
+
+
+-- ------------------------------------------------------------
+-- Q5. ENGAGEMENT / BEHAVIORAL PATTERNS
+-- (Most-used interaction channels, overall engagement level)
+-- ------------------------------------------------------------
+SELECT
+    channel,
+    COUNT(*) AS total_interactions,
+    COUNT(DISTINCT customer_id) AS unique_customers
+FROM interactions
+GROUP BY channel
+ORDER BY total_interactions DESC;
+
+
+-- ------------------------------------------------------------
+-- Q6. HIGH-ENGAGEMENT vs LOW-ENGAGEMENT CUSTOMERS
+-- (based on total interaction count)
+-- ------------------------------------------------------------
+SELECT
+    c.customer_id,
+    c.customer_name,
+    COUNT(i.interaction_id) AS total_interactions,
+    CASE
+        WHEN COUNT(i.interaction_id) >= 15 THEN 'High Engagement'
+        WHEN COUNT(i.interaction_id) >= 6  THEN 'Medium Engagement'
+        ELSE 'Low Engagement'
+    END AS engagement_level
+FROM customers c
+LEFT JOIN interactions i ON i.customer_id = c.customer_id
+GROUP BY c.customer_id
+ORDER BY total_interactions DESC;
+
+
+-- ------------------------------------------------------------
+-- Q7. REPEAT PURCHASE RATE (overall business metric)
+-- ------------------------------------------------------------
+SELECT
+    ROUND(100.0 * SUM(CASE WHEN order_count > 1 THEN 1 ELSE 0 END) / COUNT(*), 2) AS repeat_purchase_rate_percent
+FROM (
+    SELECT customer_id, COUNT(*) AS order_count
+    FROM transactions
+    GROUP BY customer_id
+);

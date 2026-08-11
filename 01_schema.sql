@@ -1,14 +1,12 @@
 -- ============================================================
--- PROJECT 1: SALES DATA ANALYSIS USING SQL
+-- PROJECT 2: CUSTOMER BEHAVIOR ANALYSIS USING SQL
 -- File: 01_schema.sql
--- Purpose: Create a well-structured relational schema
---          (customers, products, orders, order_items, payments)
+-- Purpose: Well-structured schema with proper indexing/normalization
+--          to study customer transactions and engagement behavior
 -- ============================================================
 
-DROP TABLE IF EXISTS payments;
-DROP TABLE IF EXISTS order_items;
-DROP TABLE IF EXISTS orders;
-DROP TABLE IF EXISTS products;
+DROP TABLE IF EXISTS interactions;
+DROP TABLE IF EXISTS transactions;
 DROP TABLE IF EXISTS customers;
 
 -- Customers table
@@ -20,48 +18,27 @@ CREATE TABLE customers (
     signup_date   DATE NOT NULL
 );
 
--- Products table
-CREATE TABLE products (
-    product_id    INTEGER PRIMARY KEY,
-    product_name  TEXT NOT NULL,
-    category      TEXT NOT NULL,
-    price         DECIMAL(10,2) NOT NULL,   -- selling price
-    cost          DECIMAL(10,2) NOT NULL    -- cost to business (for profit margin)
-);
-
--- Orders table
-CREATE TABLE orders (
-    order_id      INTEGER PRIMARY KEY,
-    customer_id   INTEGER NOT NULL,
-    order_date    DATE NOT NULL,
-    status        TEXT NOT NULL CHECK (status IN ('Completed','Cancelled','Pending')),
+-- Transactions table (purchase behavior)
+CREATE TABLE transactions (
+    transaction_id   INTEGER PRIMARY KEY,
+    customer_id       INTEGER NOT NULL,
+    transaction_date  DATE NOT NULL,
+    amount             DECIMAL(10,2) NOT NULL,
+    product_category   TEXT NOT NULL,
     FOREIGN KEY (customer_id) REFERENCES customers(customer_id)
 );
 
--- Order items table (one order can have many products)
-CREATE TABLE order_items (
-    order_item_id INTEGER PRIMARY KEY,
-    order_id      INTEGER NOT NULL,
-    product_id    INTEGER NOT NULL,
-    quantity      INTEGER NOT NULL,
-    unit_price    DECIMAL(10,2) NOT NULL,
-    FOREIGN KEY (order_id) REFERENCES orders(order_id),
-    FOREIGN KEY (product_id) REFERENCES products(product_id)
+-- Interactions table (engagement behavior: website visits, app opens, emails, etc.)
+CREATE TABLE interactions (
+    interaction_id   INTEGER PRIMARY KEY,
+    customer_id       INTEGER NOT NULL,
+    interaction_date  DATE NOT NULL,
+    channel            TEXT NOT NULL CHECK (channel IN ('Website Visit','App Open','Email Click','Ad Click','Support Chat')),
+    FOREIGN KEY (customer_id) REFERENCES customers(customer_id)
 );
 
--- Payments table
-CREATE TABLE payments (
-    payment_id     INTEGER PRIMARY KEY,
-    order_id       INTEGER NOT NULL,
-    payment_date   DATE NOT NULL,
-    amount         DECIMAL(10,2) NOT NULL,
-    payment_method TEXT NOT NULL,
-    FOREIGN KEY (order_id) REFERENCES orders(order_id)
-);
-
--- Helpful indexes for performance (well-structured requirement)
-CREATE INDEX idx_orders_customer ON orders(customer_id);
-CREATE INDEX idx_orders_date ON orders(order_date);
-CREATE INDEX idx_items_order ON order_items(order_id);
-CREATE INDEX idx_items_product ON order_items(product_id);
-CREATE INDEX idx_payments_order ON payments(order_id);
+-- Indexes for normalized, query-friendly structure
+CREATE INDEX idx_transactions_customer ON transactions(customer_id);
+CREATE INDEX idx_transactions_date ON transactions(transaction_date);
+CREATE INDEX idx_interactions_customer ON interactions(customer_id);
+CREATE INDEX idx_interactions_date ON interactions(interaction_date);
