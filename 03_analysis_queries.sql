@@ -1,138 +1,125 @@
 -- ============================================================
--- PROJECT 2: CUSTOMER BEHAVIOR ANALYSIS USING SQL
+-- PROJECT 3: HR ANALYTICS USING SQL
 -- File: 03_analysis_queries.sql
--- Purpose: RFM segmentation, CLV, churn detection, engagement patterns
--- "Today" reference date used for recency calculations: 2026-08-07
+-- Purpose: Attrition, salary distribution, and performance insights
 -- ============================================================
 
 -- ------------------------------------------------------------
--- Q1. RECENCY, FREQUENCY, MONETARY (RFM) PER CUSTOMER
+-- Q1. ATTRITION RATE BY DEPARTMENT
 -- ------------------------------------------------------------
 SELECT
-    c.customer_id,
-    c.customer_name,
-    CAST(julianday('2026-08-07') - julianday(MAX(t.transaction_date)) AS INTEGER) AS recency_days,
-    COUNT(t.transaction_id) AS frequency,
-    ROUND(SUM(t.amount), 2) AS monetary_value
-FROM customers c
-JOIN transactions t ON t.customer_id = c.customer_id
-GROUP BY c.customer_id
-ORDER BY monetary_value DESC;
+    d.department_name,
+    COUNT(e.employee_id) AS total_employees,
+    SUM(CASE WHEN e.status = 'Resigned' THEN 1 ELSE 0 END) AS resigned_count,
+    ROUND(100.0 * SUM(CASE WHEN e.status = 'Resigned' THEN 1 ELSE 0 END) / COUNT(e.employee_id), 2) AS attrition_rate_percent
+FROM departments d
+JOIN employees e ON e.department_id = d.department_id
+GROUP BY d.department_id
+ORDER BY attrition_rate_percent DESC;
 
 
 -- ------------------------------------------------------------
--- Q2. RFM SEGMENTATION
--- (Simple rule-based scoring: label each customer as
---  Champion / Loyal / At Risk / Lost based on recency & frequency)
+-- Q2. AVERAGE SALARY BY DEPARTMENT
 -- ------------------------------------------------------------
-WITH rfm AS (
+SELECT
+    d.department_name,
+    COUNT(e.employee_id) AS headcount,
+    ROUND(AVG(e.salary), 2) AS avg_salary,
+    MIN(e.salary) AS min_salary,
+    MAX(e.salary) AS max_salary
+FROM departments d
+JOIN employees e ON e.department_id = d.department_id
+WHERE e.status = 'Active'
+GROUP BY d.department_id
+ORDER BY avg_salary DESC;
+
+
+-- ------------------------------------------------------------
+-- Q3. GENDER PAY GAP BY DEPARTMENT
+-- ------------------------------------------------------------
+SELECT
+    d.department_name,
+    ROUND(AVG(CASE WHEN e.gender = 'Male' THEN e.salary END), 2) AS avg_salary_male,
+    ROUND(AVG(CASE WHEN e.gender = 'Female' THEN e.salary END), 2) AS avg_salary_female,
+    ROUND(
+        AVG(CASE WHEN e.gender = 'Male' THEN e.salary END) -
+        AVG(CASE WHEN e.gender = 'Female' THEN e.salary END), 2
+    ) AS pay_gap_male_minus_female
+FROM departments d
+JOIN employees e ON e.department_id = d.department_id
+WHERE e.status = 'Active'
+GROUP BY d.department_id
+ORDER BY pay_gap_male_minus_female DESC;
+
+
+-- ------------------------------------------------------------
+-- Q4. TOP PERFORMERS (rating 4 or 5, currently active)
+-- ------------------------------------------------------------
+SELECT
+    e.employee_name,
+    d.department_name,
+    e.performance_rating,
+    e.salary,
+    e.hire_date
+FROM employees e
+JOIN departments d ON d.department_id = e.department_id
+WHERE e.performance_rating >= 4 AND e.status = 'Active'
+ORDER BY e.performance_rating DESC, e.salary DESC
+LIMIT 15;
+
+
+-- ------------------------------------------------------------
+-- Q5. AVERAGE TENURE (in years) BY DEPARTMENT
+-- (For resigned employees: hire_date -> resignation_date
+--  For active employees: hire_date -> today)
+-- ------------------------------------------------------------
+SELECT
+    d.department_name,
+    ROUND(AVG(
+        CASE
+            WHEN e.status = 'Resigned' THEN julianday(e.resignation_date) - julianday(e.hire_date)
+            ELSE julianday('2026-08-07') - julianday(e.hire_date)
+        END
+    ) / 365.0, 2) AS avg_tenure_years
+FROM departments d
+JOIN employees e ON e.department_id = d.department_id
+GROUP BY d.department_id
+ORDER BY avg_tenure_years DESC;
+
+
+-- ------------------------------------------------------------
+-- Q6. PERFORMANCE RATING DISTRIBUTION (workforce quality check)
+-- ------------------------------------------------------------
+SELECT
+    performance_rating,
+    COUNT(*) AS num_employees,
+    ROUND(100.0 * COUNT(*) / (SELECT COUNT(*) FROM employees), 2) AS percent_of_workforce
+FROM employees
+GROUP BY performance_rating
+ORDER BY performance_rating DESC;
+
+
+-- ------------------------------------------------------------
+-- Q7. HIGH ATTRITION DEPARTMENTS FLAGGED FOR HR REVIEW
+-- (Departments with attrition rate above the company average)
+-- ------------------------------------------------------------
+WITH dept_attrition AS (
     SELECT
-        c.customer_id,
-        c.customer_name,
-        CAST(julianday('2026-08-07') - julianday(MAX(t.transaction_date)) AS INTEGER) AS recency_days,
-        COUNT(t.transaction_id) AS frequency,
-        ROUND(SUM(t.amount), 2) AS monetary_value
-    FROM customers c
-    JOIN transactions t ON t.customer_id = c.customer_id
-    GROUP BY c.customer_id
+        d.department_name,
+        ROUND(100.0 * SUM(CASE WHEN e.status = 'Resigned' THEN 1 ELSE 0 END) / COUNT(e.employee_id), 2) AS attrition_rate_percent
+    FROM departments d
+    JOIN employees e ON e.department_id = d.department_id
+    GROUP BY d.department_id
+),
+company_avg AS (
+    SELECT ROUND(100.0 * SUM(CASE WHEN status = 'Resigned' THEN 1 ELSE 0 END) / COUNT(*), 2) AS avg_rate
+    FROM employees
 )
 SELECT
-    customer_id,
-    customer_name,
-    recency_days,
-    frequency,
-    monetary_value,
-    CASE
-        WHEN recency_days <= 240 AND frequency >= 6 THEN 'Champion'
-        WHEN recency_days <= 400 AND frequency >= 3 THEN 'Loyal'
-        WHEN recency_days > 400 AND frequency >= 3 THEN 'At Risk'
-        WHEN recency_days > 400 AND frequency < 3  THEN 'Lost / Churned'
-        ELSE 'New / Occasional'
-    END AS rfm_segment
-FROM rfm
-ORDER BY monetary_value DESC;
-
-
--- ------------------------------------------------------------
--- Q3. CUSTOMER LIFETIME VALUE (CLV)
--- (Total spend + average order value + tenure in days)
--- ------------------------------------------------------------
-SELECT
-    c.customer_id,
-    c.customer_name,
-    c.signup_date,
-    COUNT(t.transaction_id) AS total_orders,
-    ROUND(SUM(t.amount), 2) AS total_spent,
-    ROUND(AVG(t.amount), 2) AS avg_order_value,
-    CAST(julianday('2026-08-07') - julianday(c.signup_date) AS INTEGER) AS customer_age_days,
-    ROUND(SUM(t.amount) * 1.0 /
-          ((julianday('2026-08-07') - julianday(c.signup_date)) / 365.0), 2) AS estimated_annual_clv
-FROM customers c
-JOIN transactions t ON t.customer_id = c.customer_id
-GROUP BY c.customer_id
-ORDER BY total_spent DESC
-LIMIT 10;
-
-
--- ------------------------------------------------------------
--- Q4. CHURN ANALYSIS
--- (Customers with no transaction in the last 300 days = churn risk)
--- ------------------------------------------------------------
-SELECT
-    c.customer_id,
-    c.customer_name,
-    MAX(t.transaction_date) AS last_purchase_date,
-    CAST(julianday('2026-08-07') - julianday(MAX(t.transaction_date)) AS INTEGER) AS days_since_last_purchase,
-    CASE
-        WHEN CAST(julianday('2026-08-07') - julianday(MAX(t.transaction_date)) AS INTEGER) > 300
-        THEN 'Churn Risk'
-        ELSE 'Active'
-    END AS churn_status
-FROM customers c
-JOIN transactions t ON t.customer_id = c.customer_id
-GROUP BY c.customer_id
-ORDER BY days_since_last_purchase DESC;
-
-
--- ------------------------------------------------------------
--- Q5. ENGAGEMENT / BEHAVIORAL PATTERNS
--- (Most-used interaction channels, overall engagement level)
--- ------------------------------------------------------------
-SELECT
-    channel,
-    COUNT(*) AS total_interactions,
-    COUNT(DISTINCT customer_id) AS unique_customers
-FROM interactions
-GROUP BY channel
-ORDER BY total_interactions DESC;
-
-
--- ------------------------------------------------------------
--- Q6. HIGH-ENGAGEMENT vs LOW-ENGAGEMENT CUSTOMERS
--- (based on total interaction count)
--- ------------------------------------------------------------
-SELECT
-    c.customer_id,
-    c.customer_name,
-    COUNT(i.interaction_id) AS total_interactions,
-    CASE
-        WHEN COUNT(i.interaction_id) >= 15 THEN 'High Engagement'
-        WHEN COUNT(i.interaction_id) >= 6  THEN 'Medium Engagement'
-        ELSE 'Low Engagement'
-    END AS engagement_level
-FROM customers c
-LEFT JOIN interactions i ON i.customer_id = c.customer_id
-GROUP BY c.customer_id
-ORDER BY total_interactions DESC;
-
-
--- ------------------------------------------------------------
--- Q7. REPEAT PURCHASE RATE (overall business metric)
--- ------------------------------------------------------------
-SELECT
-    ROUND(100.0 * SUM(CASE WHEN order_count > 1 THEN 1 ELSE 0 END) / COUNT(*), 2) AS repeat_purchase_rate_percent
-FROM (
-    SELECT customer_id, COUNT(*) AS order_count
-    FROM transactions
-    GROUP BY customer_id
-);
+    da.department_name,
+    da.attrition_rate_percent,
+    ca.avg_rate AS company_avg_attrition_rate,
+    'Needs HR Review' AS flag
+FROM dept_attrition da, company_avg ca
+WHERE da.attrition_rate_percent > ca.avg_rate
+ORDER BY da.attrition_rate_percent DESC;

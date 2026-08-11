@@ -1,44 +1,32 @@
 -- ============================================================
--- PROJECT 2: CUSTOMER BEHAVIOR ANALYSIS USING SQL
+-- PROJECT 3: HR ANALYTICS USING SQL
 -- File: 01_schema.sql
--- Purpose: Well-structured schema with proper indexing/normalization
---          to study customer transactions and engagement behavior
+-- Purpose: Employee, department tables linked with relational keys
+--          to analyze attrition, salary, and performance
 -- ============================================================
 
-DROP TABLE IF EXISTS interactions;
-DROP TABLE IF EXISTS transactions;
-DROP TABLE IF EXISTS customers;
+DROP TABLE IF EXISTS employees;
+DROP TABLE IF EXISTS departments;
 
--- Customers table
-CREATE TABLE customers (
-    customer_id   INTEGER PRIMARY KEY,
-    customer_name TEXT NOT NULL,
-    email         TEXT UNIQUE NOT NULL,
-    city          TEXT,
-    signup_date   DATE NOT NULL
+-- Departments table
+CREATE TABLE departments (
+    department_id   INTEGER PRIMARY KEY,
+    department_name TEXT NOT NULL UNIQUE
 );
 
--- Transactions table (purchase behavior)
-CREATE TABLE transactions (
-    transaction_id   INTEGER PRIMARY KEY,
-    customer_id       INTEGER NOT NULL,
-    transaction_date  DATE NOT NULL,
-    amount             DECIMAL(10,2) NOT NULL,
-    product_category   TEXT NOT NULL,
-    FOREIGN KEY (customer_id) REFERENCES customers(customer_id)
+-- Employees table
+CREATE TABLE employees (
+    employee_id        INTEGER PRIMARY KEY,
+    employee_name       TEXT NOT NULL,
+    department_id        INTEGER NOT NULL,
+    gender                TEXT NOT NULL CHECK (gender IN ('Male','Female')),
+    salary                DECIMAL(10,2) NOT NULL,
+    hire_date             DATE NOT NULL,
+    status                 TEXT NOT NULL CHECK (status IN ('Active','Resigned')),
+    resignation_date       DATE,               -- NULL if still active
+    performance_rating     INTEGER NOT NULL CHECK (performance_rating BETWEEN 1 AND 5),
+    FOREIGN KEY (department_id) REFERENCES departments(department_id)
 );
 
--- Interactions table (engagement behavior: website visits, app opens, emails, etc.)
-CREATE TABLE interactions (
-    interaction_id   INTEGER PRIMARY KEY,
-    customer_id       INTEGER NOT NULL,
-    interaction_date  DATE NOT NULL,
-    channel            TEXT NOT NULL CHECK (channel IN ('Website Visit','App Open','Email Click','Ad Click','Support Chat')),
-    FOREIGN KEY (customer_id) REFERENCES customers(customer_id)
-);
-
--- Indexes for normalized, query-friendly structure
-CREATE INDEX idx_transactions_customer ON transactions(customer_id);
-CREATE INDEX idx_transactions_date ON transactions(transaction_date);
-CREATE INDEX idx_interactions_customer ON interactions(customer_id);
-CREATE INDEX idx_interactions_date ON interactions(interaction_date);
+CREATE INDEX idx_employees_department ON employees(department_id);
+CREATE INDEX idx_employees_status ON employees(status);
